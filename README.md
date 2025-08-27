@@ -890,3 +890,52 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=PromtEngineer/localGPT&type=Date)](https://star-history.com/#PromtEngineer/localGPT&Date)
+
+
+
+
+
+ 1. Created new vLLM clients:
+    - backend/ollama_client.py - Now uses vLLM OpenAI-compatible API
+    - rag_system/utils/ollama_client.py - Enhanced with multimodal support for vLLM
+  2. Updated system launcher:
+    - run_system.py - Removed Ollama service, model pulling, and health checks
+    - Added vLLM server connectivity checks
+    - Updated service order and documentation
+  3. Updated configuration files:
+    - rag_system/main.py - Added VLLM_CONFIG with backward compatibility
+    - docker.env - Changed from OLLAMA_HOST to VLLM_HOST
+    - docker-compose.yml - Removed Ollama service, updated environment variables
+    - docker-compose.local-ollama.yml - Updated to use vLLM
+  4. Backward compatibility:
+    - Created OllamaClient = VLLMClient aliases in both client files
+    - Maintained OLLAMA_CONFIG as alias to VLLM_CONFIG
+    - All existing import statements continue to work without changes
+
+  🔧 Key Features of New vLLM Client:
+
+  - OpenAI API compatibility - Uses /v1/chat/completions, /v1/completions, /v1/embeddings
+  - Streaming support - Handles Server-Sent Events format
+  - Vision model support - Multimodal capabilities for image processing
+  - Async operations - Concurrent LLM calls using httpx
+  - Authentication - API key support via environment variables
+
+  📋 Required Environment Variables:
+
+  # Primary vLLM configuration
+  VLLM_HOST=http://localhost:8000          # vLLM server endpoint
+  VLLM_API_KEY=your-api-key-here          # Optional API key
+  VLLM_GENERATION_MODEL=your-model-name    # Main text model
+  VLLM_ENRICHMENT_MODEL=your-small-model   # Lightweight model
+
+  🚀 To Use the System:
+
+  1. Start your vLLM server:
+  python -m vllm.entrypoints.openai.api_server \
+    --model your-model-name \
+    --host 0.0.0.0 \
+    --port 8000
+  2. Start the RAG system:
+  python run_system.py
+
+  The system now uses vLLM instead of Ollama while maintaining full backward compatibility with existing code.

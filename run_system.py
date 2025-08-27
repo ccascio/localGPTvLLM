@@ -4,10 +4,12 @@ RAG System Unified Launcher
 ===========================
 
 A comprehensive launcher that starts all RAG system components:
-- Ollama server
 - RAG API server (port 8001)
 - Backend server (port 8000)  
 - Frontend server (port 3000)
+
+Note: This system now uses vLLM as the LLM backend instead of Ollama.
+Make sure your vLLM server is running separately before starting this system.
 
 Features:
 - Single command startup
@@ -59,7 +61,6 @@ class ColoredFormatter(logging.Formatter):
     }
     
     SERVICE_COLORS = {
-        'ollama': '\033[94m',     # Blue
         'rag-api': '\033[95m',    # Magenta
         'backend': '\033[96m',    # Cyan
         'frontend': '\033[93m',   # Yellow
@@ -125,13 +126,6 @@ class ServiceManager:
     def _get_service_configs(self) -> Dict[str, ServiceConfig]:
         """Define service configurations based on mode."""
         base_configs = {
-            'ollama': ServiceConfig(
-                name='ollama',
-                command=['ollama', 'serve'],
-                port=11434,
-                startup_delay=5,
-                required=True
-            ),
             'rag-api': ServiceConfig(
                 name='rag-api',
                 command=[sys.executable, '-m', 'rag_system.api_server'],
@@ -190,10 +184,6 @@ class ServiceManager:
         
         missing_tools = []
         
-        # Check Ollama
-        if not self._command_exists('ollama'):
-            missing_tools.append('ollama (https://ollama.ai)')
-        
         # Check Python
         if not self._command_exists('python') and not self._command_exists('python3'):
             missing_tools.append('python')
@@ -202,6 +192,20 @@ class ServiceManager:
         if not self._command_exists('npm'):
             self.logger.warning("⚠️  npm not found - frontend will be disabled")
             self.services['frontend'].required = False
+        
+        # Check if vLLM server is accessible
+        self.logger.info("🔍 Checking vLLM server connectivity...")
+        import requests
+        vllm_host = os.getenv("VLLM_HOST", "http://localhost:8000")
+        try:
+            response = requests.get(f"{vllm_host}/v1/models", timeout=5)
+            if response.status_code == 200:
+                self.logger.info("✅ vLLM server is accessible")
+            else:
+                self.logger.warning(f"⚠️  vLLM server returned status {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            self.logger.warning(f"⚠️  Cannot connect to vLLM server at {vllm_host}: {e}")
+            self.logger.warning("   Make sure your vLLM server is running before starting the system")
         
         if missing_tools:
             self.logger.error(f"❌ Missing required tools: {', '.join(missing_tools)}")
@@ -219,31 +223,29 @@ class ServiceManager:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return False
     
-    def ensure_models(self):
-        """Ensure required Ollama models are available."""
-        self.logger.info("📥 Checking required models...")
+    def check_vllm_models(self):
+        """Check which models are available on the vLLM server."""
+        self.logger.info("📥 Checking available vLLM models...")
         
-        required_models = ['qwen3:8b', 'qwen3:0.6b']
+        import requests
+        vllm_host = os.getenv("VLLM_HOST", "http://localhost:8000")
         
         try:
-            # Get list of installed models
-            result = subprocess.run(['ollama', 'list'], 
-                                  capture_output=True, text=True, timeout=10)
-            installed_models = result.stdout
-            
-            for model in required_models:
-                if model not in installed_models:
-                    self.logger.info(f"📥 Pulling {model}...")
-                    subprocess.run(['ollama', 'pull', model], 
-                                 check=True, timeout=300)  # 5 min timeout
-                    self.logger.info(f"✅ {model} ready")
+            response = requests.get(f"{vllm_host}/v1/models", timeout=10)
+            if response.status_code == 200:
+                models_data = response.json().get("data", [])
+                model_names = [model["id"] for model in models_data]
+                
+                if model_names:
+                    self.logger.info(f"✅ Available models: {', '.join(model_names)}")
                 else:
-                    self.logger.info(f"✅ {model} already available")
+                    self.logger.warning("⚠️  No models found on vLLM server")
+            else:
+                self.logger.warning(f"⚠️  Failed to get models: HTTP {response.status_code}")
                     
-        except subprocess.TimeoutExpired:
-            self.logger.warning("⚠️  Model check timed out - continuing anyway")
-        except subprocess.CalledProcessError as e:
-            self.logger.warning(f"⚠️  Could not check/pull models: {e}")
+        except requests.exceptions.RequestException as e:
+            self.logger.warning(f"⚠️  Could not check vLLM models: {e}")
+            self.logger.warning("   Make sure your vLLM server is running with models loaded")
     
     def start_service(self, service_name: str, config: ServiceConfig) -> bool:
         """Start a single service."""
@@ -353,8 +355,11 @@ class ServiceManager:
         self.running = True
         failed_services = []
         
+        # Check vLLM server availability first
+        self.check_vllm_models()
+        
         # Start services in dependency order
-        service_order = ['ollama', 'rag-api', 'backend']
+        service_order = ['rag-api', 'backend']
         if not skip_frontend and 'frontend' in self.services:
             service_order.append('frontend')
         
@@ -364,21 +369,11 @@ class ServiceManager:
                 
             config = self.services[service_name]
             
-            # Special handling for Ollama
-            if service_name == 'ollama':
-                if not self._start_ollama():
-                    if config.required:
-                        failed_services.append(service_name)
-                        continue
-                    else:
-                        self.logger.warning(f"⚠️  Skipping optional service: {service_name}")
-                        continue
-            else:
-                if not self.start_service(service_name, config):
-                    if config.required:
-                        failed_services.append(service_name)
-                    else:
-                        self.logger.warning(f"⚠️  Skipping optional service: {service_name}")
+            if not self.start_service(service_name, config):
+                if config.required:
+                    failed_services.append(service_name)
+                else:
+                    self.logger.warning(f"⚠️  Skipping optional service: {service_name}")
         
         if failed_services:
             self.logger.error(f"❌ Failed to start required services: {', '.join(failed_services)}")
@@ -388,20 +383,6 @@ class ServiceManager:
         self._print_status_summary()
         return True
     
-    def _start_ollama(self) -> bool:
-        """Special handling for Ollama startup."""
-        # Check if Ollama is already running
-        if self.is_port_in_use(11434):
-            self.logger.info("✅ Ollama already running")
-            self.ensure_models()
-            return True
-        
-        # Start Ollama
-        if self.start_service('ollama', self.services['ollama']):
-            self.ensure_models()
-            return True
-        
-        return False
     
     def _print_status_summary(self):
         """Print system status summary."""
@@ -424,6 +405,10 @@ class ServiceManager:
         self.logger.info("   • Stop system:  Ctrl+C")
         self.logger.info("   • Check logs:   tail -f logs/*.log")
         self.logger.info("   • Health check: python run_system.py --health")
+        self.logger.info("")
+        self.logger.info("⚠️  Note: Make sure your vLLM server is running separately")
+        vllm_host = os.getenv("VLLM_HOST", "http://localhost:8000")
+        self.logger.info(f"   vLLM server expected at: {vllm_host}")
     
     def shutdown(self):
         """Gracefully shutdown all services."""

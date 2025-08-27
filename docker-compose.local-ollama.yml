@@ -1,5 +1,5 @@
 services:
-  # RAG API server (connects to host Ollama)
+  # RAG API server (connects to host vLLM)
   rag-api:
     build:
       context: .
@@ -8,7 +8,9 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
+      - VLLM_HOST=http://host.docker.internal:8000
+      - VLLM_API_KEY=${VLLM_API_KEY}
+      - OLLAMA_HOST=http://host.docker.internal:8000  # Backward compatibility
       - NODE_ENV=production
     volumes:
       - ./lancedb:/app/lancedb

@@ -12,7 +12,9 @@
       "Bash(sqlite3:*)",
       "Bash(find:*)",
       "Bash(mkdir:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(PYTHONPATH=. python -c \"from rag_system.utils.ollama_client import main; main()\")"
     ],
     "deny": [],
     "ask": []

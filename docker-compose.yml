@@ -1,24 +1,7 @@
 services:
-  # Ollama service for LLM inference (optional - can use host Ollama instead)
-  ollama:
-    image: ollama/ollama:latest
-    container_name: rag-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    networks:
-      - rag-network
-    profiles:
-      - with-ollama  # Optional service - enable with --profile with-ollama
+  # Note: vLLM service is not included here as it's typically run separately
+  # with specific model configurations. Start your vLLM server manually with:
+  # python -m vllm.entrypoints.openai.api_server --model your-model-name --host 0.0.0.0 --port 8000
 
   # RAG API server
   rag-api:
@@ -29,8 +12,10 @@ services:
     ports:
       - "8001:8001"
     environment:
-      # Use host Ollama by default, or containerized Ollama if enabled
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      # Use host vLLM server by default
+      - VLLM_HOST=${VLLM_HOST:-http://host.docker.internal:8000}
+      - VLLM_API_KEY=${VLLM_API_KEY}
+      - OLLAMA_HOST=${VLLM_HOST:-http://host.docker.internal:8000}  # Backward compatibility
       - NODE_ENV=production
     volumes:
       - ./lancedb:/app/lancedb
@@ -56,7 +41,9 @@ services:
     environment:
       - NODE_ENV=production
       - RAG_API_URL=http://rag-api:8001
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://172.18.0.1:11434}
+      - VLLM_HOST=${VLLM_HOST:-http://172.18.0.1:8000}
+      - VLLM_API_KEY=${VLLM_API_KEY}
+      - OLLAMA_HOST=${VLLM_HOST:-http://172.18.0.1:8000}  # Backward compatibility
     volumes:
       - ./backend:/app/backend
       - ./shared_uploads:/app/shared_uploads
@@ -95,9 +82,8 @@ services:
     networks:
       - rag-network
 
-volumes:
-  ollama_data:
-    driver: local
+# volumes:
+  # Note: ollama_data volume removed since we're using vLLM instead
 
 networks:
   rag-network:

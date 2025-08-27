@@ -3,17 +3,21 @@ import json
 import os
 from typing import List, Dict, Optional
 
-class OllamaClient:
-    def __init__(self, base_url: Optional[str] = None):
+class VLLMClient:
+    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
         if base_url is None:
-            base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.base_url = base_url
-        self.api_url = f"{base_url}/api"
+            base_url = os.getenv("VLLM_HOST", "http://localhost:8000")
+        self.base_url = base_url.rstrip('/')
+        self.api_key = api_key or os.getenv("VLLM_API_KEY")
+        
+        self.headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            self.headers["Authorization"] = f"Bearer {self.api_key}"
     
-    def is_ollama_running(self) -> bool:
-        """Check if Ollama server is running"""
+    def is_server_running(self) -> bool:
+        """Check if vLLM server is running"""
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.base_url}/v1/models", headers=self.headers, timeout=5)
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -21,41 +25,27 @@ class OllamaClient:
     def list_models(self) -> List[str]:
         """Get list of available models"""
         try:
-            response = requests.get(f"{self.api_url}/tags")
+            response = requests.get(f"{self.base_url}/v1/models", headers=self.headers)
             if response.status_code == 200:
-                models = response.json().get("models", [])
-                return [model["name"] for model in models]
+                models_data = response.json().get("data", [])
+                return [model["id"] for model in models_data]
             return []
         except requests.exceptions.RequestException as e:
             print(f"Error fetching models: {e}")
             return []
     
     def pull_model(self, model_name: str) -> bool:
-        """Pull a model if not available"""
-        try:
-            response = requests.post(
-                f"{self.api_url}/pull",
-                json={"name": model_name},
-                stream=True
-            )
-            
-            if response.status_code == 200:
-                print(f"Pulling model {model_name}...")
-                for line in response.iter_lines():
-                    if line:
-                        data = json.loads(line)
-                        if "status" in data:
-                            print(f"Status: {data['status']}")
-                        if data.get("status") == "success":
-                            return True
-                return True
-            return False
-        except requests.exceptions.RequestException as e:
-            print(f"Error pulling model: {e}")
+        """Models are pre-loaded in vLLM, so this is a no-op"""
+        available_models = self.list_models()
+        if model_name in available_models:
+            print(f"Model {model_name} is available")
+            return True
+        else:
+            print(f"Model {model_name} not found in available models: {available_models}")
             return False
     
     def chat(self, message: str, model: str = "llama3.2", conversation_history: List[Dict] = None, enable_thinking: bool = True) -> str:
-        """Send a chat message to Ollama"""
+        """Send a chat message to vLLM server"""
         if conversation_history is None:
             conversation_history = []
         
@@ -67,35 +57,23 @@ class OllamaClient:
                 "model": model,
                 "messages": messages,
                 "stream": False,
+                "temperature": 0.7,
+                "top_p": 0.9
             }
             
-            # Multiple approaches to disable thinking tokens
-            if not enable_thinking:
-                payload.update({
-                    "think": False,  # Native Ollama parameter
-                    "options": {
-                        "think": False,
-                        "thinking": False,
-                        "temperature": 0.7,
-                        "top_p": 0.9
-                    }
-                })
-            else:
-                payload["think"] = True
-            
             response = requests.post(
-                f"{self.api_url}/chat",
+                f"{self.base_url}/v1/chat/completions",
+                headers=self.headers,
                 json=payload,
                 timeout=180
             )
             
             if response.status_code == 200:
                 result = response.json()
-                response_text = result["message"]["content"]
+                response_text = result["choices"][0]["message"]["content"]
                 
                 # Additional cleanup: remove any thinking tokens that might slip through
                 if not enable_thinking:
-                    # Remove common thinking token patterns
                     import re
                     response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL | re.IGNORECASE)
                     response_text = re.sub(r'<thinking>.*?</thinking>', '', response_text, flags=re.DOTALL | re.IGNORECASE)
@@ -109,7 +87,7 @@ class OllamaClient:
             return f"Connection error: {e}"
     
     def chat_stream(self, message: str, model: str = "llama3.2", conversation_history: List[Dict] = None, enable_thinking: bool = True):
-        """Stream chat response from Ollama"""
+        """Stream chat response from vLLM server"""
         if conversation_history is None:
             conversation_history = []
         
@@ -120,24 +98,13 @@ class OllamaClient:
                 "model": model,
                 "messages": messages,
                 "stream": True,
+                "temperature": 0.7,
+                "top_p": 0.9
             }
             
-            # Multiple approaches to disable thinking tokens
-            if not enable_thinking:
-                payload.update({
-                    "think": False,  # Native Ollama parameter
-                    "options": {
-                        "think": False,
-                        "thinking": False,
-                        "temperature": 0.7,
-                        "top_p": 0.9
-                    }
-                })
-            else:
-                payload["think"] = True
-            
             response = requests.post(
-                f"{self.api_url}/chat",
+                f"{self.base_url}/v1/chat/completions",
+                headers=self.headers,
                 json=payload,
                 stream=True,
                 timeout=180
@@ -146,18 +113,26 @@ class OllamaClient:
             if response.status_code == 200:
                 for line in response.iter_lines():
                     if line:
+                        line_text = line.decode('utf-8')
+                        if line_text.startswith('data: '):
+                            line_text = line_text[6:]  # Remove 'data: ' prefix
+                        
+                        if line_text.strip() == '[DONE]':
+                            break
+                            
                         try:
-                            data = json.loads(line)
-                            if "message" in data and "content" in data["message"]:
-                                content = data["message"]["content"]
+                            data = json.loads(line_text)
+                            if "choices" in data and len(data["choices"]) > 0:
+                                delta = data["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
                                 
-                                # Filter out thinking tokens in streaming mode
-                                if not enable_thinking:
-                                    # Skip content that looks like thinking tokens
-                                    if '<think>' in content.lower() or '<thinking>' in content.lower():
-                                        continue
-                                
-                                yield content
+                                if content:
+                                    # Filter out thinking tokens in streaming mode
+                                    if not enable_thinking:
+                                        if '<think>' in content.lower() or '<thinking>' in content.lower():
+                                            continue
+                                    
+                                    yield content
                         except json.JSONDecodeError:
                             continue
             else:
@@ -167,36 +142,36 @@ class OllamaClient:
             yield f"Connection error: {e}"
 
 def main():
-    """Test the Ollama client"""
-    client = OllamaClient()
+    """Test the vLLM client"""
+    client = VLLMClient()
     
-    # Check if Ollama is running
-    if not client.is_ollama_running():
-        print("❌ Ollama is not running. Please start Ollama first.")
-        print("Install: https://ollama.ai")
-        print("Run: ollama serve")
+    # Check if vLLM server is running
+    if not client.is_server_running():
+        print("❌ vLLM server is not running. Please start vLLM server first.")
+        print("Example: python -m vllm.entrypoints.openai.api_server --model your-model")
         return
     
-    print("✅ Ollama is running!")
+    print("✅ vLLM server is running!")
     
     # List available models
     models = client.list_models()
     print(f"Available models: {models}")
     
-    # Try to use llama3.2, pull if needed
-    model_name = "llama3.2"
-    if model_name not in [m.split(":")[0] for m in models]:
-        print(f"Model {model_name} not found. Pulling...")
-        if client.pull_model(model_name):
-            print(f"✅ Model {model_name} pulled successfully!")
-        else:
-            print(f"❌ Failed to pull model {model_name}")
-            return
+    if not models:
+        print("❌ No models available")
+        return
+    
+    # Use first available model
+    model_name = models[0]
+    print(f"Using model: {model_name}")
     
     # Test chat
     print("\n🤖 Testing chat...")
     response = client.chat("Hello! Can you tell me a short joke?", model_name)
     print(f"AI: {response}")
+
+# For backward compatibility, create an alias
+OllamaClient = VLLMClient
 
 if __name__ == "__main__":
     main()    

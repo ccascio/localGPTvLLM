@@ -25,12 +25,16 @@ from rag_system.utils.ollama_client import OllamaClient
 # ============================================================================
 # All model configurations are centralized here to prevent conflicts
 
-# Ollama Models Configuration (for inference via Ollama)
-OLLAMA_CONFIG = {
-    "host": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
-    "generation_model": "qwen3:8b",  # Main text generation model
-    "enrichment_model": "qwen3:0.6b",  # Lightweight model for routing/enrichment
+# vLLM Models Configuration (for inference via vLLM)
+VLLM_CONFIG = {
+    "host": os.getenv("VLLM_HOST", "http://localhost:8000"),
+    "api_key": os.getenv("VLLM_API_KEY"),
+    "generation_model": os.getenv("VLLM_GENERATION_MODEL", "qwen3:8b"),  # Main text generation model
+    "enrichment_model": os.getenv("VLLM_ENRICHMENT_MODEL", "qwen3:0.6b"),  # Lightweight model for routing/enrichment
 }
+
+# For backward compatibility
+OLLAMA_CONFIG = VLLM_CONFIG
 
 # External Model Configuration (HuggingFace models used directly)
 EXTERNAL_MODELS = {
