@@ -72,6 +72,23 @@ backend/chroma_db/**
 rag_system/documents/
 *.pdf
 
+# Claude Code and AI tools
+.claude/
+.cursor/
+.vscode/
+.idea/
+
+# Downloaded files and temporary items
+Ollama.app/
+ollama-darwin.zip
+*.zip
+*.tar.gz
+*.dmg
+
+# Temporary scripts and test files
+check_nat11_embeddings.py
+retrieve_nat11_samples.py
+
 # Ensure docker.env remains tracked
 !docker.env
 !backend/chat_data.db
