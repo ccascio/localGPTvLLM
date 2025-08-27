@@ -86,7 +86,7 @@ class OllamaClient:
             response = requests.post(
                 f"{self.api_url}/chat",
                 json=payload,
-                timeout=60
+                timeout=180
             )
             
             if response.status_code == 200:
@@ -140,7 +140,7 @@ class OllamaClient:
                 f"{self.api_url}/chat",
                 json=payload,
                 stream=True,
-                timeout=60
+                timeout=180
             )
             
             if response.status_code == 200:

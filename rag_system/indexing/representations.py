@@ -105,7 +105,7 @@ class EmbeddingGenerator:
 
 class OllamaEmbedder(EmbeddingModel):
     """Call Ollama's /api/embeddings endpoint for each text."""
-    def __init__(self, model_name: str, host: str | None = None, timeout: int = 60):
+    def __init__(self, model_name: str, host: str | None = None, timeout: int = 180):
         self.model_name = model_name
         self.host = (host or os.getenv("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
         self.timeout = timeout

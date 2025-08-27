@@ -563,10 +563,11 @@ class ChatAPI {
       denseWeight?: number;
       forceRag?: boolean;
       provencePrune?: boolean;
+      timeout?: number; // Add timeout parameter
     },
     onEvent: (event: { type: string; data: any }) => void,
   ): Promise<void> {
-    const { query, model, session_id, table_name, composeSubAnswers, decompose, aiRerank, contextExpand, verify, retrievalK, contextWindowSize, rerankerTopK, searchType, denseWeight, forceRag, provencePrune } = params;
+    const { query, model, session_id, table_name, composeSubAnswers, decompose, aiRerank, contextExpand, verify, retrievalK, contextWindowSize, rerankerTopK, searchType, denseWeight, forceRag, provencePrune, timeout = 300000 } = params; // Default 5 minutes timeout
 
     const payload: Record<string, unknown> = { query };
     if (model) payload.model = model;
@@ -586,46 +587,59 @@ class ChatAPI {
     if (typeof forceRag === 'boolean') payload.force_rag = forceRag;
     if (typeof provencePrune === 'boolean') payload.provence_prune = provencePrune;
 
-    const resp = await fetch('http://localhost:8001/chat/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    // Create AbortController for timeout
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), timeout);
 
-    if (!resp.ok || !resp.body) {
-      throw new Error(`Stream request failed: ${resp.status}`);
-    }
+    try {
+      const resp = await fetch('http://localhost:8001/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
+      });
+      
+      if (!resp.ok || !resp.body) {
+        throw new Error(`Stream request failed: ${resp.status}`);
+      }
 
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-    let streamClosed = false;
-    while (!streamClosed) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      let streamClosed = false;
+      while (!streamClosed) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
 
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith('data:')) continue;
-        const jsonStr = line.replace(/^data:\s*/, '');
-        try {
-          const evt = JSON.parse(jsonStr);
-          onEvent(evt);
-          if (evt.type === 'complete') {
-            // Gracefully close the stream so the caller unblocks
-            try { await reader.cancel(); } catch {}
-            streamClosed = true;
-            break;
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data:')) continue;
+          const jsonStr = line.replace(/^data:\s*/, '');
+          try {
+            const evt = JSON.parse(jsonStr);
+            onEvent(evt);
+            if (evt.type === 'complete') {
+              // Gracefully close the stream so the caller unblocks
+              try { await reader.cancel(); } catch {}
+              streamClosed = true;
+              break;
+            }
+          } catch {
+            /* noop */
           }
-        } catch {
-          /* noop */
         }
       }
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error(`Request timed out after ${timeout / 1000} seconds`);
+      }
+      throw error;
     }
   }
 }

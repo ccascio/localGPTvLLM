@@ -93,7 +93,7 @@ class OllamaClient:
         format: str = "",
         images: List[Image.Image] | None = None,
         enable_thinking: bool | None = None,
-        timeout: int = 60,
+        timeout: int = 180,
     ) -> Dict[str, Any]:
         """Asynchronous version of generate_completion using httpx."""
 

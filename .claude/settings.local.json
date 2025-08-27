@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(npm install)",
+      "Bash(lsof:*)",
+      "Bash(sudo chown:*)",
+      "Bash(rm:*)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0)",
+      "Bash(sqlite3:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(python3:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
